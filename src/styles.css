@@ -269,6 +269,7 @@ body.dark .modal {
   display: flex;
   gap: 24px;
   align-items: flex-start;
+  flex-direction: column;
 }
 
 .video-editor .preview-column {
@@ -289,7 +290,7 @@ body.dark .modal {
 }
 
 .video-editor .clips-sidebar {
-  width: 340px;
+  width: 100%;
   flex-shrink: 0;
 }
 
@@ -317,7 +318,4 @@ body.dark .modal {
 
 .video-editor .note { margin-top: 12px; color: #999; }
 
-@media (max-width: 900px) {
-  .video-editor .editor-body { flex-direction: column; }
-  .video-editor .clips-sidebar { width: 100%; }
-}
+

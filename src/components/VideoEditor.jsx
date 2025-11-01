@@ -1,58 +1,117 @@
-import React, {useRef, useState, useEffect} from 'react';
+import React, { useRef, useState, useEffect } from 'react';
+import WaveSurfer from 'wavesurfer.js';
 
-export default function VideoEditor(){
+
+export default function VideoEditor() {
   const videoRef = useRef();
   const [clips, setClips] = useState([]); // {file, name, start, end, url}
   const [message, setMessage] = useState('');
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
   const ffmpegRef = useRef();
   const fetchFileRef = useRef();
+  const wavesurferRef = useRef(null);
 
-  async function loadFFmpeg(){
-    if(ffmpegRef.current) return;
-    setMessage('Loading FFmpeg core (wasm) — this can take a few seconds...');
-    let createFFmpeg, fetchFile;
-    try{
-      const mod = await import('@ffmpeg/ffmpeg');
-      createFFmpeg = mod.createFFmpeg;
-      fetchFile = mod.fetchFile;
-    }catch(err){
-      console.error('Failed to import @ffmpeg/ffmpeg', err);
-      setMessage('Failed to load ffmpeg module');
-      return;
+  useEffect(() => {
+    if (!wavesurferRef.current) {
+      wavesurferRef.current = WaveSurfer.create({
+        container: '#waveform',
+        waveColor: '#ddd',
+        progressColor: '#2196f3',
+        height: 100,
+        responsive: true,
+      });
     }
 
-    fetchFileRef.current = fetchFile;
+    return () => {
+      wavesurferRef.current?.destroy();
+    };
+  }, []);
 
-    const ffmpeg = createFFmpeg({ log: true });
-    try{
-      await ffmpeg.load();
-    }catch(err){
-      console.error('FFmpeg load failed', err);
-      setMessage('Failed to load ffmpeg');
-      return;
-    }
-    ffmpegRef.current = ffmpeg;
-    setFfmpegLoaded(true);
-    setMessage('FFmpeg loaded');
-  }
+    async function loadFFmpeg() {
 
+      if (ffmpegRef.current) return; // If worker already exists, do nothing
 
-  function handleFiles(e){
-    const files = Array.from(e.target.files).filter(f => f.type.startsWith('video/'));
-    const newClips = files.map(f => {
-      return {
-        file: f,
-        name: f.name,
-        start: 0,
-        end: null,
-        url: URL.createObjectURL(f)
+      setMessage('Loading FFmpeg core (wasm) — this can take a few seconds...');
+
+  
+
+      const worker = new Worker(new URL('../ffmpegWorker.js', import.meta.url), { type: 'module' });
+
+      ffmpegRef.current = worker; // Store the worker instance
+
+  
+
+      worker.onmessage = (e) => {
+
+        const { type, message, ratio } = e.data;
+
+        switch (type) {
+
+          case 'READY':
+
+            setFfmpegLoaded(true);
+
+            setMessage('FFmpeg loaded');
+
+            break;
+
+          case 'PROGRESS':
+
+            setMessage(`Progress: \${(ratio * 100).toFixed(0)}%`);
+
+            break;
+
+          case 'ERROR':
+
+            console.error('FFmpeg Worker Error:', message);
+
+            setMessage(`FFmpeg Error: \${message}`);
+
+            break;
+
+          case 'DONE':
+
+            // This case will be handled by export functions
+
+            break;
+
+          default:
+
+            break;
+
+        }
+
       };
-    });
+
+  
+
+      worker.onerror = (e) => {
+
+        console.error('FFmpeg Worker Error:', e);
+
+        setMessage(`FFmpeg Worker Error: \${e.message}`);
+
+      };
+
+  
+
+      worker.postMessage({ type: 'INIT' }); // Initialize the worker
+
+    }
+
+  function handleFiles(e) {
+    const files = Array.from(e.target.files).filter(f => f.type.startsWith('video/'));
+    const newClips = files.map(f => ({
+      file: f,
+      name: f.name,
+      start: 0,
+      end: null,
+      url: URL.createObjectURL(f),
+    }));
     setClips(prev => prev.concat(newClips));
   }
 
-  function setClipRange(index, start, end){
+  function setClipRange(index, start, end) {
     setClips(prev => {
       const copy = JSON.parse(JSON.stringify(prev));
       copy[index].start = Number(start);
@@ -61,77 +120,162 @@ export default function VideoEditor(){
     });
   }
 
-  function removeClip(i){
+  function removeClip(i) {
     setClips(prev => prev.filter((_, idx) => idx !== i));
   }
 
-   async function exportVideo() {
+  async function exportVideo() {
     if (clips.length === 0) return alert('Add at least one clip');
-    await loadFFmpeg();
+    setMessage('Starting export...');
+    try {
+      await loadFFmpeg();
+      const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg) {
+        setMessage('FFmpeg not loaded. Please try again.');
+        return;
+      }
+      const fetchFile = fetchFileRef.current;
+      setMessage('Preparing segments for concatenation...');
 
-    const ffmpeg = ffmpegRef.current;
-    setMessage('Preparing segments for concatenation...');
+      const segmentFiles = [];
+      for (let i = 0; i < clips.length; i++) {
+        const c = clips[i];
+        const inputName = `input\${i}.mp4`;
+        const outName = `seg\${i}.mp4`;
+        setMessage(`Processing clip \${i + 1}/\${clips.length}: Writing file...`);
+        ffmpeg.FS('writeFile', inputName, await fetchFile(c.file));
+        const start = c.start || 0;
+        const duration = c.end != null ? c.end - start : null;
+        const cmd = [
+          '-ss', `\${start}`,
+          '-i', inputName,
+          ...(duration ? ['-t', `\${duration}`] : []),
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-c:a', 'aac',
+          outName,
+        ];
+        setMessage(`Creating segment \${i + 1}/\${clips.length}...`);
+        await ffmpeg.run(...cmd);
+        segmentFiles.push(outName);
+      }
 
-    const segmentFiles = [];
-    for (let i = 0; i < clips.length; i++) {
-      const c = clips[i];
-      const inputName = `input${i}.mp4`;
-      const outName = `seg${i}.mp4`;
-  ffmpeg.FS('writeFile', inputName, await fetchFileRef.current(c.file));
-      const start = c.start || 0;
-      const duration = c.end != null ? (c.end - start) : null;
-      const cmd = ['-ss', `${start}`, '-i', inputName, ...(duration ? ['-t', `${duration}`] : []), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', outName];
-      setMessage(`Creating segment ${i + 1}/${clips.length}...`);
-      await ffmpeg.run(...cmd);
-      segmentFiles.push(outName);
+      const concatText = segmentFiles.map(f => `file '\${f}'`).join('\\n');
+      ffmpeg.FS('writeFile', 'concat.txt', concatText);
+      setMessage('Concatenating segments...');
+      try {
+        await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'output.mp4');
+      } catch (e) {
+        setMessage('Codec copy failed, re-encoding... This may take a while.');
+        await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', 'output.mp4');
+      }
+
+      setMessage('Export complete — preparing download...');
+      const data = ffmpeg.FS('readFile', 'output.mp4');
+      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'edited-video.mp4';
+      a.click();
+      setMessage('Download started.');
+    } catch (error) {
+      console.error(error);
+      setMessage(`An error occurred during export: \${error.message}. Check the console for more details.`);
     }
-
-    // write concat list
-    const concatText = segmentFiles.map(f => `file '${f}'`).join('\n');
-    ffmpeg.FS('writeFile', 'concat.txt', concatText);
-    setMessage('Concatenating segments...');
-    try{
-      await ffmpeg.run('-f','concat','-safe','0','-i','concat.txt','-c','copy','output.mp4');
-    }catch(e){
-      // fallback to re-encode concatenation
-      await ffmpeg.run('-f','concat','-safe','0','-i','concat.txt','-c:v','libx264','-preset','veryfast','-c:a','aac','output.mp4');
-    }
-
-    setMessage('Export complete — preparing download...');
-    const data = ffmpeg.FS('readFile', 'output.mp4');
-    const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'edited-video.mp4';
-    a.click();
-    setMessage('Download started.');
   }
-  async function exportVideoSimple() {
-    // simple wrapper that delegates to exportVideo() to avoid duplicate implementations
-    return exportVideo();
+
+  async function exportAudio() {
+    if (clips.length === 0) return alert('Add at least one clip');
+    setMessage('Starting audio export...');
+    try {
+      await loadFFmpeg();
+      const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg) {
+        setMessage('FFmpeg not loaded. Please try again.');
+        return;
+      }
+      const fetchFile = fetchFileRef.current;
+      setMessage('Preparing for audio export...');
+
+      const audioSegments = [];
+      for (let i = 0; i < clips.length; i++) {
+        const c = clips[i];
+        const inputName = `input\${i}.mp4`;
+        const outName = `seg\${i}.mp3`;
+        setMessage(`Processing clip \${i + 1}/\${clips.length}: Writing file...`);
+        ffmpeg.FS('writeFile', inputName, await fetchFile(c.file));
+        const start = c.start || 0;
+        const duration = c.end != null ? c.end - start : null;
+        const cmd = [
+          '-ss', `\${start}`,
+          '-i', inputName,
+          ...(duration ? ['-t', `\${duration}`] : []),
+          '-vn', // no video
+          '-c:a', 'libmp3lame',
+          outName,
+        ];
+        setMessage(`Extracting audio from segment \${i + 1}/\${clips.length}...`);
+        await ffmpeg.run(...cmd);
+        audioSegments.push(outName);
+      }
+
+      const concatText = audioSegments.map(f => `file '\${f}'`).join('\\n');
+      ffmpeg.FS('writeFile', 'concat.txt', concatText);
+      setMessage('Concatenating audio segments...');
+      
+      await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'output.mp3');
+
+      setMessage('Export complete — preparing download...');
+      const data = ffmpeg.FS('readFile', 'output.mp3');
+      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'audio/mp3' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'edited-audio.mp3';
+      a.click();
+      setMessage('Download started.');
+    } catch (error) {
+      console.error(error);
+      setMessage(`An error occurred during audio export: \${error.message}. Check the console for more details.`);
+    }
   }
 
   return (
     <div className="video-editor">
       <div className="toolbar-row">
-        <label style={{display:'inline-flex',alignItems:'center',gap:8}}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <input className="file-input" type="file" accept="video/*" multiple onChange={handleFiles} />
         </label>
 
-        <button onClick={loadFFmpeg} className="secondary" style={{marginLeft:8}} title="Preload FFmpeg">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 12l7 7 7-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span style={{marginLeft:8}}>Preload FFmpeg</span>
+        <button onClick={loadFFmpeg} className="secondary" style={{ marginLeft: 8 }} title="Preload FFmpeg">
+          <span style={{ marginLeft: 8 }}>Preload FFmpeg</span>
         </button>
 
-        <button onClick={exportVideo} style={{marginLeft:8}} title="Export">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M17 8l-5-5-5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 3v14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span style={{marginLeft:8}}>Export (ffmpeg.wasm)</span>
+        <button onClick={exportVideo} style={{ marginLeft: 8 }} title="Export MP4">
+          <span style={{ marginLeft: 8 }}>Export MP4</span>
+        </button>
+        <button onClick={exportAudio} style={{ marginLeft: 8 }} title="Export MP3">
+          <span style={{ marginLeft: 8 }}>Export MP3</span>
         </button>
       </div>
 
       <div className="editor-body">
         <div className="preview-column">
           <video ref={videoRef} className="editor-preview" controls></video>
+          <div id="waveform" style={{ width: '100%', height: '100px' }}></div>
+
+          <div style={{ marginTop: '8px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button onClick={() => wavesurferRef.current?.play()}>Play Audio</button>
+            <button onClick={() => wavesurferRef.current?.pause()} style={{ marginLeft: 8 }}>Pause Audio</button>
+            <label style={{ fontSize: '0.9rem' }}>Zoom:</label>
+            <input
+              type="range"
+              min="0"
+              max="200"
+              defaultValue="0"
+              onChange={(e) => wavesurferRef.current?.zoom(Number(e.target.value))}
+            />
+          </div>
+
           <p className="hint">Click a clip below to load into preview.</p>
         </div>
 
@@ -144,16 +288,44 @@ export default function VideoEditor(){
                 <div className="clip-row">
                   <div className="clip-name">{c.name}</div>
                   <div>
-                    <button onClick={() => { videoRef.current.src = c.url; videoRef.current.currentTime = c.start || 0; videoRef.current.play(); }}>Preview</button>
-                    <button onClick={() => removeClip(idx)} style={{marginLeft:6}}>Remove</button>
+                    <button
+                      onClick={() => {
+                        videoRef.current.src = c.url;
+                        videoRef.current.currentTime = c.start || 0;
+                        videoRef.current.play();
+                        if (wavesurferRef.current) {
+                          wavesurferRef.current.empty();
+                          wavesurferRef.current.load(c.url);
+                        }
+                      }}
+                    >
+                      Preview
+                    </button>
+                    <button onClick={() => removeClip(idx)} style={{ marginLeft: 6 }}>Remove</button>
                   </div>
                 </div>
 
                 <div className="clip-controls">
-                  <label>Start (s): </label>
-                  <input type="number" step="0.1" value={c.start} min="0" onChange={(e)=> setClipRange(idx, e.target.value, c.end)} />
-                  <label style={{marginLeft:8}}>End (s/null): </label>
-                  <input type="number" step="0.1" value={c.end ?? ''} min="0" onChange={(e)=> setClipRange(idx, c.start, e.target.value === '' ? null : e.target.value)} />
+                  <label>Start:</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max={c.end ?? 30}
+                    step="0.1"
+                    value={c.start}
+                    onChange={(e) => setClipRange(idx, e.target.value, c.end)}
+                  />
+                  <label style={{ marginLeft: 8 }}>End:</label>
+                  <input
+                    type="range"
+                    min={c.start}
+                    max={30}
+                    step="0.1"
+                    value={c.end ?? 30}
+                    onChange={(e) =>
+                      setClipRange(idx, c.start, e.target.value === '' ? null : e.target.value)
+                    }
+                  />
                 </div>
               </div>
             ))}

@@ -92,9 +92,8 @@ export default function App() {
         <div className="app-container">
           <header className="header">
             <div style={{display:'flex',alignItems:'center',gap:12}}>
-              <img src={isDark ? darkLogo : lightLogo} alt="DatIz4Free" style={{height:44, width:'auto', borderRadius:6}} />
               <div style={{display:'flex',flexDirection:'column'}}>
-                <div style={{fontWeight:700, lineHeight:1}}>DatIz4Free</div>
+                <img src={isDark ? darkLogo : lightLogo} alt="DatIz4Free" style={{height:44, width:'auto', borderRadius:6}} />
                 <small style={{opacity:0.85}}>🎬 browser editor</small>
               </div>
             </div>
@@ -104,12 +103,8 @@ export default function App() {
                 <button title="Purple" onClick={() => setAccent('#8b5cf6','#ec4899')} style={{background:'linear-gradient(90deg,#8b5cf6,#ec4899)'}}></button>
                 <button title="Orange" onClick={() => setAccent('#fb923c','#f97316')} style={{background:'linear-gradient(90deg,#fb923c,#f97316)'}}></button>
               </div>
-              <button className="secondary" onClick={toggleTheme} style={{marginLeft:12}} title="Toggle theme">
-                {isDark ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 19v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M4.2 4.2l1.4 1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M18.4 18.4l1.4 1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M1 12h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 12h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M4.2 19.8l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M18.4 5.6l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                )}
+              <button className="secondary" onClick={toggleTheme} style={{marginLeft:12, color: '#333', border: '1px solid #333'}} title="Toggle theme">
+                Light/Dark Toggle
               </button>
             </div>
           </header>
