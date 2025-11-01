@@ -22,6 +22,10 @@ export default function VideoEditor(){
     setFfmpegLoaded(true);
     setMessage('FFmpeg loaded');
   }
+  useEffect(() => {
+  document.body.classList.toggle('dark', darkMode);
+}, [darkMode]);
+
 
   function handleFiles(e){
     const files = Array.from(e.target.files).filter(f => f.type.startsWith('video/'));
@@ -50,7 +54,89 @@ export default function VideoEditor(){
     setClips(prev => prev.filter((_, idx) => idx !== i));
   }
 
-  async function exportVideo(){
+   async function exportVideo() {
+    if (clips.length === 0) return alert('Add at least one clip');
+    await loadFFmpeg();
+
+    const ffmpeg = ffmpegRef.current;
+    setMessage('Processing clips with fade and crossfade effects...');
+
+    const fadeDuration = 1.0; // seconds
+    const segmentFiles = [];
+
+    // Step 1: preprocess each clip (trim + fade in/out)
+    for (let i = 0; i < clips.length; i++) {
+      const c = clips[i];
+      const inputName = `input${i}.mp4`;
+      const outName = `clip${i}.mp4`;
+      ffmpeg.FS('writeFile', inputName, await fetchFile(c.file));
+
+      const start = c.start || 0;
+      const duration = c.end != null ? (c.end - start) : null;
+
+      const vf = `fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${duration ? duration - fadeDuration : 0}:d=${fadeDuration}`;
+      const af = `afade=t=in:st=0:d=${fadeDuration},afade=t=out:st=${duration ? duration - fadeDuration : 0}:d=${fadeDuration}`;
+
+      const cmd = [
+        '-ss', `${start}`,
+        '-i', inputName,
+        ...(duration ? ['-t', `${duration}`] : []),
+        '-vf', vf,
+        '-af', af,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-c:a', 'aac',
+        outName
+      ];
+
+      setMessage(`Encoding clip ${i + 1}/${clips.length}...`);
+      await ffmpeg.run(...cmd);
+      segmentFiles.push(outName);
+    }
+
+    // Step 2: apply crossfades between clips
+    if (segmentFiles.length === 1) {
+      // only one clip
+      ffmpeg.FS('rename', segmentFiles[0], 'output.mp4');
+    } else {
+      // progressively xfade all clips
+      let previous = segmentFiles[0];
+      for (let i = 1; i < segmentFiles.length; i++) {
+        const next = segmentFiles[i];
+        const output = `xfaded${i}.mp4`;
+
+        setMessage(`Crossfading clip ${i} with previous...`);
+        // use xfade and acrossfade for smooth transitions
+        await ffmpeg.run(
+          '-i', previous,
+          '-i', next,
+          '-filter_complex',
+          `[0:v][1:v]xfade=transition=fade:duration=${fadeDuration}:offset=${duration ? duration - fadeDuration : 0},format=yuv420p;[0:a][1:a]acrossfade=d=${fadeDuration}`,
+          '-c:v', 'libx264', '-preset', 'veryfast',
+          '-c:a', 'aac',
+          output
+        );
+
+        // cleanup old file to save memory
+        try { ffmpeg.FS('unlink', previous); } catch {}
+        try { ffmpeg.FS('unlink', next); } catch {}
+
+        previous = output;
+      }
+      ffmpeg.FS('rename', previous, 'output.mp4');
+    }
+
+    // Step 3: download
+    setMessage('Export complete — preparing download...');
+    const data = ffmpeg.FS('readFile', 'output.mp4');
+    const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'edited-video.mp4';
+    a.click();
+    setMessage('Download started.');
+  }
+  async function exportVideoSimple() {
     if(clips.length === 0) return alert('Add at least one clip');
     await loadFFmpeg();
 
