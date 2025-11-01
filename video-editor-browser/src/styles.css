@@ -1,0 +1,4 @@
+body { margin:0; padding:0; font-family: Inter, Roboto, sans-serif; background: #fafafa; color:#222; }
+button { padding:6px 10px; border-radius:4px; background:#1976d2; color:white; border:none; cursor:pointer; }
+button:disabled { opacity:0.6; cursor:not-allowed; }
+input[type="number"] { padding:6px; }
